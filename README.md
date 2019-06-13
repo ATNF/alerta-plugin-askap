@@ -3,10 +3,10 @@ Modfiy Incomming Alerts for ASKAP
 
 Modify incomming alerts for ASKAP:
 
-Change Kapacitor Alert Levels - Modify the default kapacitor alert
+1. Change Kapacitor Alert Levels - Modify the default kapacitor alert
 levels to the "EPICS" alert levels of OK,MINOR,MAJOR
 
-Add Grafana Dashboard links to Kapacitor Generated Alerts. There must exist
+2. Add Grafana Dashboard links to Kapacitor Generated Alerts. There must exist
 a Grafana Dashboard with the same name as the event name, e.g. "PAF Health".
 Furthermore the Grafana Dashboard UID must be set to be the same as the 
 Grafana Dashboard name.
@@ -20,7 +20,7 @@ Clone the GitHub repo and run:
 
 Or, to install remotely from GitHub run:
 
-    $ pip install git+https://github.com/alerta/alerta-contrib.git#subdirectory=plugins/askap
+    $ pip install git+https://github.com/atnf/alerta-plugin-askap.git
 
 Note: If Alerta is installed in a python virtual environment then plugins
 need to be installed into the same environment for Alerta to dynamically
@@ -36,15 +36,12 @@ server configuration file or as environment variables.
 ```python
 PLUGINS = ['askap']
 ```
-
-If the "run book" attribute is used the `RUNBOOK_URL` should be changed
-to a valid URL.
+set the GRAFANA_URL environment variable to the Grafana instance to link to, e.g.
 
 **Example**
 
 ```python
-PLUGINS = ['askap', 'reject']
-RUNBOOK_URL = 'http://www.example.com/wiki/RunBook'
+GRAFANA_URL = 'http://mygrafana:3000'
 ```
 
 Troubleshooting
