@@ -53,7 +53,7 @@ SLACK_DEFAULT_SEVERITY_MAP = {'security': '#000000', # black
                               'trace': '#808080', # gray
                               'ok': '#00CC00'} # green
 SLACK_SUMMARY_FMT = app.config.get('SLACK_SUMMARY_FMT', None)  # Message summary format
-SLACK_DEFAULT_SUMMARY_FMT='*[{status}] {environment} {service} {severity}* - _{event} on {resource}_ <{dashboard}/#/alert/{alert_id}|{short_id}>'
+SLACK_DEFAULT_SUMMARY_FMT='*[{status}] {severity}* - <{dashboard}/#/alert/{alert_id}|{event} on {resource}>'
 ICON_EMOJI = os.environ.get('ICON_EMOJI') or app.config.get(
     'ICON_EMOJI', ':rocket:')
 SLACK_PAYLOAD = app.config.get('SLACK_PAYLOAD', None)  # Full API control
@@ -154,7 +154,7 @@ class ServiceIntegration(PluginBase):
                     status=alert.status.capitalize(),
                     environment=alert.environment.upper(),
                     service=','.join(alert.service),
-                    severity=alert.severity.capitalize(),
+                    severity=alert.severity,
                     event=alert.event,
                     resource=alert.resource,
                     alert_id=alert.id,
@@ -175,6 +175,17 @@ class ServiceIntegration(PluginBase):
                         dashboard,
                         dashboard.lower(),
                         _make_url_params_from_tags(alert))
+                fields = [
+                        {"title": "Grafana", "value": grafana,
+                         "short": True},
+                        {"title": "Status", "value": (status if status else alert.status).capitalize(),
+                         "short": True},
+                        {"title": "Subsystem", "value": ", ".join( alert.service), "short": True}
+                        ]
+                for tag in alert.tags:
+                    if '=' in tag:
+                        k,v = tag.split('=')
+                        fields.append({"title": k, "value": v, "short": True})
                 payload = {
                     "username": ALERTA_USERNAME,
                     "channel": channel,
@@ -183,17 +194,7 @@ class ServiceIntegration(PluginBase):
                     "attachments": [{
                         "fallback": summary,
                         "color": color,
-                        "fields": [
-                            {"title": "Grafana", "value": grafana,
-                             "short": True},
-                            {"title": "Status", "value": (status if status else alert.status).capitalize(),
-                             "short": True},
-                            {"title": "Environment",
-                                "value": alert.environment, "short": True},
-                            {"title": "Resource", "value": alert.resource, "short": True},
-                            {"title": "Services", "value": ", ".join(
-                                alert.service), "short": True}
-                        ]
+                        "fields": fields,
                     }]
                 }
 
