@@ -17,7 +17,7 @@ setup(
     zip_safe=True,
     entry_points={
         'alerta.plugins': [
-            'askap = alerta_askap:ModifyAlert'
+            'askap = alerta_askap:ServiceIntegration'
         ]
     }
 )
