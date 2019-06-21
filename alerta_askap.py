@@ -53,7 +53,7 @@ SLACK_DEFAULT_SEVERITY_MAP = {'security': '#000000', # black
                               'trace': '#808080', # gray
                               'ok': '#00CC00'} # green
 SLACK_SUMMARY_FMT = app.config.get('SLACK_SUMMARY_FMT', None)  # Message summary format
-SLACK_DEFAULT_SUMMARY_FMT='*[{status}] {severity}* - <{dashboard}/#/alert/{alert_id}|{event} on {resource}>'
+SLACK_DEFAULT_SUMMARY_FMT='{icon} *[{status}] {severity}* - <{dashboard}/#/alert/{alert_id}|{event} on {resource}>'
 ICON_EMOJI = os.environ.get('ICON_EMOJI') or app.config.get(
     'ICON_EMOJI', ':rocket:')
 SLACK_PAYLOAD = app.config.get('SLACK_PAYLOAD', None)  # Full API control
@@ -65,6 +65,11 @@ SLACK_HEADERS = {
 SLACK_TOKEN = os.environ.get('SLACK_TOKEN') or app.config.get('SLACK_TOKEN',None)
 if SLACK_TOKEN:
     SLACK_HEADERS['Authorization'] = 'Bearer ' + SLACK_TOKEN
+
+SLACK_ICONS = {
+        'OK' : ':ok_hand:',
+        'MINOR' : ':bomb:',
+        'MAJOR' : ':boom:'}
 
 def _make_url_params_from_tags(alert):
     params = ""
@@ -87,11 +92,12 @@ class ServiceIntegration(PluginBase):
         super(ServiceIntegration, self).__init__(name)
 
     def pre_receive(self, alert):
-        LOG.info('processing alert {0} sev {1} x'.format(alert.event,alert.severity))
+        LOG.error('processing alert {0} sev {1} x'.format(alert.event,alert.severity))
 
         # map alert levels to the 'EPICS' alert levels we define in alertad.conf
         if alert.severity in ALERT_SEVERITY_MAP:
             alert.severity = ALERT_SEVERITY_MAP[alert.severity]
+            LOG.error('new sev {0}'.format(alert.severity))
 
         if alert.origin == "kapacitor":
             # add a Grafana dashboard link for Kapacitor generated alerts
@@ -101,6 +107,10 @@ class ServiceIntegration(PluginBase):
                     dashboard,
                     dashboard.lower(),
                     _make_url_params_from_tags(alert))
+        elif alert.origin == "Grafana":
+            # modify URL attribute from Grafana alert to be same as kapacitor alerts
+            alert.attributes['Grafana Dashboard'] = alert.attributes['ruleUrl']
+            alert.attributes.pop('ruleUrl', None)
 
         return alert
 
@@ -151,7 +161,8 @@ class ServiceIntegration(PluginBase):
                 summary = self._format_template(SLACK_SUMMARY_FMT, templateVars)
             else:
                 summary = SLACK_DEFAULT_SUMMARY_FMT.format(
-                    status=alert.status.capitalize(),
+                    icon=SLACK_ICONS.get(alert.severity, ':question:'),
+                    status=(status if status else alert.status).capitalize(),
                     environment=alert.environment.upper(),
                     service=','.join(alert.service),
                     severity=alert.severity,
@@ -170,7 +181,7 @@ class ServiceIntegration(PluginBase):
                 }
             else:
                 dashboard=alert.event.replace(' ', '-')
-                grafana = '<{0}/d/{1}/{2}{3}"|{1}>'.format(
+                grafana = '<{0}/d/{1}/{2}{3}|{1}>'.format(
                         GRAFANA_URL,
                         dashboard,
                         dashboard.lower(),
@@ -219,7 +230,7 @@ class ServiceIntegration(PluginBase):
         except Exception as e:
             raise RuntimeError("Slack connection error: %s", e)
 
-        LOG.debug('Slack response: %s\n%s' % (r.status_code, r.text))
+        LOG.debug('Slack response: %s %s' % (r.status_code, r.text))
 
     def status_change(self, alert, status, text):
         if SLACK_SEND_ON_ACK == False or status not in ['ack', 'assign']:
@@ -239,4 +250,4 @@ class ServiceIntegration(PluginBase):
         except Exception as e:
             raise RuntimeError("Slack connection error: %s", e)
 
-        LOG.debug('Slack response: %s\n%s' % (r.status_code, r.text))
+        LOG.debug('Slack response: %s %s' % (r.status_code, r.text))
