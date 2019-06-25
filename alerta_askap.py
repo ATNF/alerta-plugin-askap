@@ -4,6 +4,8 @@ import logging
 import os
 import requests
 import traceback
+from html.parser import HTMLParser
+
 
 try:
     from jinja2 import Template
@@ -82,6 +84,26 @@ def _make_url_params_from_tags(alert):
             join  = "&"
     return params
 
+class LinkParser(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self._href = None
+        self._title = None
+
+    def handle_starttag(self, tag, attrs):
+        for attr in attrs:
+            if attr[0] == 'href':
+                self._href = attr[1]
+
+    def handle_data(self, data):
+        self._title = data
+
+    def get_href(self):
+        return self._href
+
+    def get_title(self):
+        return self._title
+
 class ServiceIntegration(PluginBase):
 
     def __init__(self, name=None):
@@ -92,12 +114,12 @@ class ServiceIntegration(PluginBase):
         super(ServiceIntegration, self).__init__(name)
 
     def pre_receive(self, alert):
-        LOG.error('processing alert {0} sev {1} x'.format(alert.event,alert.severity))
+        LOG.debug('processing alert {0} sev {1} x'.format(alert.event,alert.severity))
 
         # map alert levels to the 'EPICS' alert levels we define in alertad.conf
         if alert.severity in ALERT_SEVERITY_MAP:
             alert.severity = ALERT_SEVERITY_MAP[alert.severity]
-            LOG.error('new sev {0}'.format(alert.severity))
+            LOG.debug('new sev {0}'.format(alert.severity))
 
         if alert.origin == "kapacitor":
             # add a Grafana dashboard link for Kapacitor generated alerts
@@ -107,11 +129,13 @@ class ServiceIntegration(PluginBase):
                     dashboard,
                     dashboard.lower(),
                     _make_url_params_from_tags(alert))
-        elif alert.origin == "Grafana":
+        elif alert.origin == "Grafana" and 'ruleUrl' in alert.attributes:
             # modify URL attribute from Grafana alert to be same as kapacitor alerts
+            LOG.debug("ruleUrl is {0}".format(alert.attributes['ruleUrl']))
             alert.attributes['Grafana Dashboard'] = alert.attributes['ruleUrl']
             alert.attributes.pop('ruleUrl', None)
 
+        LOG.debug("Grafana Dashboard is {0}".format(alert.attributes['Grafana Dashboard']))
         return alert
 
     def _format_template(self, templateFmt, templateVars):
@@ -181,14 +205,14 @@ class ServiceIntegration(PluginBase):
                 }
             else:
                 dashboard=alert.event.replace(' ', '-')
-                grafana = '<{0}/d/{1}/{2}{3}|{1}>'.format(
-                        GRAFANA_URL,
-                        dashboard,
-                        dashboard.lower(),
-                        _make_url_params_from_tags(alert))
-                fields = [
-                        {"title": "Grafana", "value": grafana,
-                         "short": True},
+                fields = []
+                if 'Grafana Dashboard' in alert.attributes:
+                    parser = LinkParser()
+                    parser.feed(alert.attributes['Grafana Dashboard'])
+                    grafana = '<{0}|{1}>'.format(parser.get_href(), parser.get_title())
+                    fields.append({"title": "Grafana", "value": grafana, "short": True})
+
+                fields += [
                         {"title": "Status", "value": (status if status else alert.status).capitalize(),
                          "short": True},
                         {"title": "Subsystem", "value": ", ".join( alert.service), "short": True}
