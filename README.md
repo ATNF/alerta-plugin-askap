@@ -1,7 +1,7 @@
-Modfiy Incomming Alerts for ASKAP & Publish to Slack/Mattermost
-===============================================================
+Modfiy Incomming Alerts & Publish to Slack/Mattermost
+=====================================================
 
-Modify incomming alerts for ASKAP:
+Modify incomming alerts:
 
 1. Change Kapacitor Alert Levels - Modify the default kapacitor alert
 levels to the "EPICS" alert levels of OK,MINOR,MAJOR
