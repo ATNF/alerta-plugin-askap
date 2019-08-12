@@ -4,8 +4,14 @@ import logging
 import os
 import requests
 import traceback
+import re
 from html.parser import HTMLParser
 
+# extract tag for grafana alert from evalMatches
+# grafana current value on OK
+# set service for grafana alerts
+
+LOG = logging.getLogger('alerta.plugins.askap')
 
 try:
     from jinja2 import Template
@@ -19,7 +25,6 @@ except ImportError:
 
 from alerta.plugins import PluginBase
 
-LOG = logging.getLogger('alerta.plugins.askap')
 
 # ASKAP alert mapping plugin options
 ALERT_SEVERITY_MAP = app.config.get('ASKAP_ALERT_SEVERITY_MAP', dict())
@@ -135,7 +140,12 @@ class ServiceIntegration(PluginBase):
             alert.attributes['Grafana Dashboard'] = alert.attributes['ruleUrl']
             alert.attributes.pop('ruleUrl', None)
 
-        LOG.debug("Grafana Dashboard is {0}".format(alert.attributes['Grafana Dashboard']))
+            # look for service tag in message 
+            # to route to correct channel
+            parts=re.split('.*service\ *=\ *', alert.text)
+            if len(parts) > 1:
+                alert.service = [parts[1]]
+
         return alert
 
     def _format_template(self, templateFmt, templateVars):
@@ -213,9 +223,10 @@ class ServiceIntegration(PluginBase):
                     fields.append({"title": "Grafana", "value": grafana, "short": True})
 
                 fields += [
-                        {"title": "Status", "value": (status if status else alert.status).capitalize(),
-                         "short": True},
-                        {"title": "Subsystem", "value": ", ".join( alert.service), "short": True}
+                        {"title": "Origin", "value": alert.origin, "short": True},
+                        {"title": "Subsystem", "value": ", ".join( alert.service), "short": True},
+                        {"title": "Value", "value": alert.value, "short": True},
+                        {"title": "Text", "value": text or alert.text, "short": True}
                         ]
                 for tag in alert.tags:
                     if '=' in tag:
@@ -243,6 +254,7 @@ class ServiceIntegration(PluginBase):
         try:
             payload = self._slack_prepare_payload(alert)
 
+            LOG.debug("alert receive alert %s" % alert)
             LOG.debug('Slack payload: %s', payload)
         except Exception as e:
             LOG.error('Exception formatting payload: %s\n%s' % (e, traceback.format_exc()))
@@ -263,6 +275,7 @@ class ServiceIntegration(PluginBase):
         try:
             payload = self._slack_prepare_payload(alert, status, text)
 
+            LOG.debug("alert status change alert %s status %s text %s" % (alert, status, text))
             LOG.debug('Slack payload: %s', payload)
         except Exception as e:
             LOG.error('Exception formatting payload: %s\n%s' % (e, traceback.format_exc()))
