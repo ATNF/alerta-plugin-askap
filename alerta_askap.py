@@ -33,8 +33,6 @@ GRAFANA_URL = app.config.get('GRAFANA_URL', 'http://localhost')
 # SLACK plugin options
 SLACK_WEBHOOK_URL = os.environ.get(
     'SLACK_WEBHOOK_URL') or app.config['SLACK_WEBHOOK_URL']
-SLACK_ATTACHMENTS = True if os.environ.get(
-    'SLACK_ATTACHMENTS', 'False') == 'True' else app.config.get('SLACK_ATTACHMENTS', False)
 SLACK_CHANNEL = os.environ.get(
     'SLACK_CHANNEL') or app.config.get('SLACK_CHANNEL', '')
 try:
@@ -45,6 +43,8 @@ except Exception as e:
 
 SLACK_SERVICE_CHANNELS = app.config.get('SLACK_SERVICE_CHANNELS', False)
 
+ALERTAWEB_URL = os.environ.get(
+        'ALERTAWEB_URL') or app.config.get('ALERTAWEB_URL', '')
 ALERTA_USERNAME = os.environ.get(
     'ALERTA_USERNAME') or app.config.get('ALERTA_USERNAME', 'alerta')
 SLACK_SEND_ON_ACK = os.environ.get(
@@ -59,13 +59,8 @@ SLACK_DEFAULT_SEVERITY_MAP = {'security': '#000000', # black
                               'debug': '#808080', # gray
                               'trace': '#808080', # gray
                               'ok': '#00CC00'} # green
-SLACK_SUMMARY_FMT = app.config.get('SLACK_SUMMARY_FMT', None)  # Message summary format
-SLACK_DEFAULT_SUMMARY_FMT='{icon} *[{status}] {severity}* - <{dashboard}/#/alert/{alert_id}|{event} on {resource}>'
 ICON_EMOJI = os.environ.get('ICON_EMOJI') or app.config.get(
     'ICON_EMOJI', ':rocket:')
-SLACK_PAYLOAD = app.config.get('SLACK_PAYLOAD', None)  # Full API control
-DASHBOARD_URL = os.environ.get(
-    'DASHBOARD_URL') or app.config.get('DASHBOARD_URL', '')
 SLACK_HEADERS = {
     'Content-Type': 'application/json'
 }
@@ -185,64 +180,45 @@ class ServiceIntegration(PluginBase):
             'emoji': ICON_EMOJI,
         }
 
-        if SLACK_PAYLOAD:
-            LOG.debug("Formatting with slack payload template")
-            formattedPayload = self._format_template(json.dumps(SLACK_PAYLOAD), templateVars).replace('\n', '\\n')
-            LOG.debug("Formatted slack payload:\n%s" % formattedPayload)
-            payload = json.loads(formattedPayload)
-        else:
-            if type(SLACK_SUMMARY_FMT) is str:
-                summary = self._format_template(SLACK_SUMMARY_FMT, templateVars)
-            else:
-                summary = SLACK_DEFAULT_SUMMARY_FMT.format(
-                    icon=SLACK_ICONS.get(alert.severity, ':question:'),
-                    status=(status if status else alert.status).capitalize(),
-                    environment=alert.environment.upper(),
-                    service=','.join(alert.service),
-                    severity=alert.severity,
-                    event=alert.event,
-                    resource=alert.resource,
-                    alert_id=alert.id,
-                    short_id=alert.get_id(short=True),
-                    dashboard=DASHBOARD_URL
-                )
-            if not SLACK_ATTACHMENTS:
-                payload = {
-                    "username": ALERTA_USERNAME,
-                    "channel": channel,
-                    "text": summary,
-                    "icon_emoji": ICON_EMOJI
-                }
-            else:
-                dashboard=alert.event.replace(' ', '-')
-                fields = []
-                if 'Grafana Dashboard' in alert.attributes:
-                    parser = LinkParser()
-                    parser.feed(alert.attributes['Grafana Dashboard'])
-                    grafana = '<{0}|{1}>'.format(parser.get_href(), parser.get_title())
-                    fields.append({"title": "Grafana", "value": grafana, "short": True})
+        summary = '{icon} *[{status}] {severity}* - <{alerta}/#/alert/{alert_id}|{event} on {resource}>'.format(
+            icon=SLACK_ICONS.get(alert.severity, ':question:'),
+            status=(status if status else alert.status).capitalize(),
+            severity=alert.severity,
+            alerta=ALERTAWEB_URL,
+            alert_id=alert.id,
+            event=alert.event,
+            resource=alert.resource
+        )
 
-                fields += [
-                        {"title": "Origin", "value": alert.origin, "short": True},
-                        {"title": "Subsystem", "value": ", ".join( alert.service), "short": True},
-                        {"title": "Value", "value": alert.value, "short": True},
-                        {"title": "Text", "value": text or alert.text, "short": True}
-                        ]
-                for tag in alert.tags:
-                    if '=' in tag:
-                        k,v = tag.split('=')
-                        fields.append({"title": k, "value": v, "short": True})
-                payload = {
-                    "username": ALERTA_USERNAME,
-                    "channel": channel,
-                    "icon_emoji": ICON_EMOJI,
-                    "text": summary,
-                    "attachments": [{
-                        "fallback": summary,
-                        "color": color,
-                        "fields": fields,
-                    }]
-                }
+        dashboard=alert.event.replace(' ', '-')
+        fields = []
+        if 'Grafana Dashboard' in alert.attributes:
+            parser = LinkParser()
+            parser.feed(alert.attributes['Grafana Dashboard'])
+            grafana = '<{0}|{1}>'.format(parser.get_href(), parser.get_title())
+            fields.append({"title": "Grafana", "value": grafana, "short": True})
+
+        fields += [
+                {"title": "Origin", "value": alert.origin, "short": True},
+                {"title": "Subsystem", "value": ", ".join( alert.service), "short": True},
+                {"title": "Value", "value": alert.value, "short": True},
+                {"title": "Text", "value": text or alert.text, "short": True}
+                ]
+        for tag in alert.tags:
+            if '=' in tag:
+                k,v = tag.split('=')
+                fields.append({"title": k, "value": v, "short": True})
+        payload = {
+            "username": ALERTA_USERNAME,
+            "channel": channel,
+            "icon_emoji": ICON_EMOJI,
+            "text": summary,
+            "attachments": [{
+                "fallback": summary,
+                "color": color,
+                "fields": fields,
+            }]
+        }
 
         return payload
 
