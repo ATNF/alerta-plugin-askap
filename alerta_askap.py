@@ -73,16 +73,32 @@ SLACK_ICONS = {
         'MINOR' : ':bomb:',
         'MAJOR' : ':boom:'}
 
-def _make_url_params_from_tags(alert):
+def _get_dashboard(alert):
+    '''
+    return a Grafana Dashboard URL either from specified tag or service name
+    '''
+    uid = alert.event.replace(' ', '-')
+    dashboard = uid
     params = ""
     join="?"
     LOG.info("alert tags : {0}".format(alert.tags))
     for tag in alert.tags:
         if '=' in tag:
             k,v = tag.split('=')
-            params += "{0}var-{1}={2}".format(join,k,v)
+            if k == 'dashboard':
+                # override default dashboard
+                # with one specified in tag set
+                # in Kapacitor rule
+                # either as UID only or uid/name
+                tmp = v.split('/')
+                uid = tmp[0]
+                if len(tmp) > 1:
+                    dashboard = tmp[1]
+                continue
+            params += "{0}var-{1}={2}".format(join, k, v)
             join  = "&"
-    return params
+
+    return '<a target="_blank" rel="noopener noreferrer" href="{0}/d/{1}/{2}{3}">{1}</a>'.format(GRAFANA_URL, uid, dashboard, params)
 
 class LinkParser(HTMLParser):
     def __init__(self):
@@ -123,12 +139,7 @@ class ServiceIntegration(PluginBase):
 
         if alert.origin == "kapacitor":
             # add a Grafana dashboard link for Kapacitor generated alerts
-            dashboard=alert.event.replace(' ', '-')
-            alert.attributes['Grafana Dashboard'] = '<a target="_blank" rel="noopener noreferrer" href="{0}/d/{1}/{2}{3}">{1}</a>'.format(
-                    GRAFANA_URL,
-                    dashboard,
-                    dashboard.lower(),
-                    _make_url_params_from_tags(alert))
+            alert.attributes['Grafana Dashboard'] = _get_dashboard(alert)
         elif alert.origin == "Grafana" and 'ruleUrl' in alert.attributes:
             # modify URL attribute from Grafana alert to be same as kapacitor alerts
             LOG.debug("ruleUrl is {0}".format(alert.attributes['ruleUrl']))
@@ -190,7 +201,6 @@ class ServiceIntegration(PluginBase):
             resource=alert.resource
         )
 
-        dashboard=alert.event.replace(' ', '-')
         fields = []
         if 'Grafana Dashboard' in alert.attributes:
             parser = LinkParser()
@@ -207,6 +217,8 @@ class ServiceIntegration(PluginBase):
         for tag in alert.tags:
             if '=' in tag:
                 k,v = tag.split('=')
+                if k == 'dashboard':
+                    continue
                 fields.append({"title": k, "value": v, "short": True})
         payload = {
             "username": ALERTA_USERNAME,
