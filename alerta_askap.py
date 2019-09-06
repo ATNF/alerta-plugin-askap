@@ -24,11 +24,15 @@ except ImportError:
     from alerta.app import app  # alerta < 5.0
 
 from alerta.plugins import PluginBase
-
+from alerta.app import db
 
 # ASKAP alert mapping plugin options
 ALERT_SEVERITY_MAP = app.config.get('ASKAP_ALERT_SEVERITY_MAP', dict())
+DEFAULT_NORMAL_SEVERITY = app.config.get('DEFAULT_NORMAL_SEVERITY', 'OK')
 GRAFANA_URL = app.config.get('GRAFANA_URL', 'http://localhost')
+
+FLAPPING_WINDOW=app.config.get('FLAPPING_WINDOWS', 3600)
+FLAPPING_COUNT=app.config.get('FLAPPING_COUNT', 4)
 
 # SLACK plugin options
 SLACK_WEBHOOK_URL = os.environ.get(
@@ -81,7 +85,7 @@ def _get_dashboard(alert):
     dashboard = uid
     params = ""
     join="?"
-    LOG.info("alert tags : {0}".format(alert.tags))
+    LOG.debug("alert tags : {0}".format(alert.tags))
     for tag in alert.tags:
         if '=' in tag:
             k,v = tag.split('=')
@@ -99,6 +103,18 @@ def _get_dashboard(alert):
             join  = "&"
 
     return '<a target="_blank" rel="noopener noreferrer" href="{0}/d/{1}/{2}{3}">{1}</a>'.format(GRAFANA_URL, uid, dashboard, params)
+
+def _human_time(seconds):
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    str = ""
+    if h > 0:
+        str += "{0}h ".format(h)
+    if m > 0:
+        str += "{0}m ".format(m)
+    if s > 0:
+        str += "{0}s ".format(s)
+    return str.strip()
 
 class LinkParser(HTMLParser):
     def __init__(self):
@@ -191,14 +207,23 @@ class ServiceIntegration(PluginBase):
             'emoji': ICON_EMOJI,
         }
 
-        summary = '{icon} *[{status}] {severity}* - <{alerta}/#/alert/{alert_id}|{event} on {resource}>'.format(
-            icon=SLACK_ICONS.get(alert.severity, ':question:'),
-            status=(status if status else alert.status).capitalize(),
+        icon = SLACK_ICONS.get(alert.severity, ':question:')
+        status = (status if status else alert.status).capitalize()
+        flapnotify = ""
+        if alert.attributes.get("flapping", False):
+            icon = ":bird:"
+            status = "FLAPPING"
+            flapnotify= " is flapping, suppressing further notifications"
+
+        summary = '{icon} *[{status}] {severity}* - <{alerta}/#/alert/{alert_id}|{event} on {resource}{flapnotify}>'.format(
+            icon=icon,
+            status=status,
             severity=alert.severity,
             alerta=ALERTAWEB_URL,
             alert_id=alert.id,
             event=alert.event,
-            resource=alert.resource
+            resource=alert.resource,
+            flapnotify=flapnotify
         )
 
         fields = []
@@ -220,6 +245,13 @@ class ServiceIntegration(PluginBase):
                 if k == 'dashboard':
                     continue
                 fields.append({"title": k, "value": v, "short": True})
+
+        if alert.attributes.get("flapping", False):
+            flapmsg = "alert has flapped more than {0} times in the last {1}".format(
+                    FLAPPING_COUNT,
+                    _human_time(FLAPPING_WINDOW))
+            fields.append({"title": "flapping", "value": flapmsg, "short": True})
+
         payload = {
             "username": ALERTA_USERNAME,
             "channel": channel,
@@ -239,10 +271,30 @@ class ServiceIntegration(PluginBase):
         if alert.repeat:
             return
 
+        flapnotify = False
+        if alert.is_flapping(window=FLAPPING_WINDOW, count=FLAPPING_COUNT):
+            if alert.severity != DEFAULT_NORMAL_SEVERITY:
+                if not alert.attributes.get('flapping', False):
+                    # notify if it has transitioned to flapping
+                    LOG.debug("ALERT HAS STARTED TO FLAP")
+                    flapnotify = True
+
+                alert.attributes['flapping'] = True
+        else:
+            alert.attributes['flapping'] = False
+            flapnotify = True
+
+        # alert updates in post_receive need 
+        # to be saved back into the databbase
+        # https://github.com/alerta/alerta/pull/211
+        db.dedup_alert(alert, None)
+
+        if alert.attributes.get('flapping', False) and not flapnotify:
+            LOG.info("SUPRESSING notification due to flapping")
+            return
+
         try:
             payload = self._slack_prepare_payload(alert)
-
-            LOG.debug("alert receive alert %s" % alert)
             LOG.debug('Slack payload: %s', payload)
         except Exception as e:
             LOG.error('Exception formatting payload: %s\n%s' % (e, traceback.format_exc()))
@@ -264,7 +316,7 @@ class ServiceIntegration(PluginBase):
             payload = self._slack_prepare_payload(alert, status, text)
 
             LOG.debug("alert status change alert %s status %s text %s" % (alert, status, text))
-            LOG.debug('Slack payload: %s', payload)
+            LOG.info('Slack payload: %s', payload)
         except Exception as e:
             LOG.error('Exception formatting payload: %s\n%s' % (e, traceback.format_exc()))
             return
