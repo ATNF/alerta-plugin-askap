@@ -145,7 +145,7 @@ class ServiceIntegration(PluginBase):
 
         super(ServiceIntegration, self).__init__(name)
 
-    def pre_receive(self, alert):
+    def pre_receive(self, alert, **kwargs):
         LOG.debug('processing alert {0} sev {1} x'.format(alert.event,alert.severity))
 
         # map alert levels to the 'EPICS' alert levels we define in alertad.conf
@@ -266,7 +266,7 @@ class ServiceIntegration(PluginBase):
 
         return payload
 
-    def post_receive(self, alert):
+    def post_receive(self, alert, **kwargs):
 
         if alert.repeat:
             return
@@ -286,8 +286,7 @@ class ServiceIntegration(PluginBase):
 
         # alert updates in post_receive need 
         # to be saved back into the databbase
-        # https://github.com/alerta/alerta/pull/211
-        db.dedup_alert(alert, None)
+        db.update_attributes(alert.id, None, alert.attributes)
 
         if alert.attributes.get('flapping', False) and not flapnotify:
             LOG.info("SUPRESSING notification due to flapping")
@@ -308,7 +307,7 @@ class ServiceIntegration(PluginBase):
 
         LOG.debug('Slack response: %s %s' % (r.status_code, r.text))
 
-    def status_change(self, alert, status, text):
+    def status_change(self, alert, status, text, **kwargs):
         if SLACK_SEND_ON_ACK == False or status not in ['ack', 'assign']:
             return
 
