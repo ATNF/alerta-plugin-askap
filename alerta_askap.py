@@ -286,7 +286,7 @@ class ServiceIntegration(PluginBase):
 
         # alert updates in post_receive need 
         # to be saved back into the databbase
-        db.update_attributes(alert.id, None, alert.attributes)
+        db.update_attributes(alert.id, {}, alert.attributes)
 
         if alert.attributes.get('flapping', False) and not flapnotify:
             LOG.info("SUPRESSING notification due to flapping")
